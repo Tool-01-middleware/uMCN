@@ -1,0 +1,23 @@
+menuconfig PKG_USING_UMCN
+    bool "ENABLE: uMCN package"
+    default n
+    help
+        Enable uMCN package and compile sources in this folder.
+
+if PKG_USING_UMCN
+
+config UMCN_USING_CMD
+    bool "Enable uMCN command support (cmd_mcn.c)"
+    default n
+    help
+        Build cmd_mcn.c and enable command related features.
+
+config UMCN_USING_DEMO
+    bool "Enable uMCN demo examples"
+    default n
+    help
+        Build examples under examples/ when selected.
+
+endif
+
+
