@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <optparse.h>
+#include "optparse.h"
 #include <shell.h>
 
 #include "uMCN.h"
