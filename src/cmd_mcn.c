@@ -335,33 +335,32 @@ static int echo_topic(struct optparse options)
     return EXIT_SUCCESS;
 }
 
-int cmd_mcn(int argc, char** argv)
-{
-    char* arg;
-    struct optparse options;
-    int res = EXIT_SUCCESS;
+int cmdMcn(int argc, char** argv) {
+  char* arg;
+  struct optparse options;
+  int res = EXIT_SUCCESS;
 
-    console_dev = rt_console_get_device();
+  console_dev = rt_console_get_device();
 
-    optparse_init(&options, argv);
+  optparse_init(&options, argv);
 
-    arg = optparse_arg(&options);
-    if (arg) {
-        if (STRING_COMPARE(arg, "list")) {
-            list_topic();
-        } else if (STRING_COMPARE(arg, "echo")) {
-            res = echo_topic(options);
-        } else if (STRING_COMPARE(arg, "suspend")) {
-            res = suspend_topic(options);
-        } else if (STRING_COMPARE(arg, "resume")) {
-            res = resume_topic(options);
-        } else {
-            show_usage();
-        }
+  arg = optparse_arg(&options);
+  if (arg) {
+    if (STRING_COMPARE(arg, "list")) {
+      list_topic();
+    } else if (STRING_COMPARE(arg, "echo")) {
+      res = echo_topic(options);
+    } else if (STRING_COMPARE(arg, "suspend")) {
+      res = suspend_topic(options);
+    } else if (STRING_COMPARE(arg, "resume")) {
+      res = resume_topic(options);
     } else {
-        show_usage();
+      show_usage();
     }
+  } else {
+    show_usage();
+  }
 
-    return res;
+  return res;
 }
-MSH_CMD_EXPORT_ALIAS(cmd_mcn, mcn, uMCN topics operations);
+MSH_CMD_EXPORT_ALIAS(cmdMcn, cmdMcn, uMCN topics operations);
