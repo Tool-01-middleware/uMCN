@@ -42,6 +42,9 @@ struct mcn_node {
     MCN_EVENT_HANDLE event;
     void (*pub_cb)(void* parameter);
     McnNode_t next;
+    void (*async_cb)(const void* data, void* user_data);
+    void* async_cb_user_data;
+    rt_uint8_t async_pending;
 };
 
 typedef struct mcn_hub McnHub;
@@ -101,6 +104,8 @@ void mcn_resume(McnHub_t hub);
 McnList_t mcn_get_list(void);
 McnHub_t mcn_iterate(McnList_t* ite);
 void mcn_node_clear(McnNode_t node_t);
+rt_err_t mcn_register_async_cb(McnNode_t node_t, void (*async_cb)(const void* data, void* user_data), void* user_data);
+rt_err_t mcn_unregister_async_cb(McnNode_t node_t);
 
 #ifdef __cplusplus
 }

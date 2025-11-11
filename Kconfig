@@ -18,6 +18,12 @@ menuconfig L1_MIDDLEWARE_PACKAGE_01_UMCN_USING_UMCN
             help
                 Build examples under examples/ when selected.
 
+        config UMCN_USING_EXAMPLE_CB
+            bool "Enable uMCN callback chaining sample"
+            default n
+            help
+                Build the example_cb sample demonstrating asynchronous callback driven task queue.
+
     endif
 
 

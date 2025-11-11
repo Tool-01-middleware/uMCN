@@ -22,8 +22,25 @@
 #define DBG_LVL    DBG_INFO
 #include <rtdbg.h>
 
+#ifndef MCN_ASYNC_THREAD_STACK_SIZE
+#define MCN_ASYNC_THREAD_STACK_SIZE 2048
+#endif
+
+#ifndef MCN_ASYNC_THREAD_PRIORITY
+#define MCN_ASYNC_THREAD_PRIORITY (RT_THREAD_PRIORITY_MAX / 2)
+#endif
+
+#ifndef MCN_ASYNC_THREAD_TIMESLICE
+#define MCN_ASYNC_THREAD_TIMESLICE 10
+#endif
+
 static McnList __mcn_list = { .hub = RT_NULL, .next = RT_NULL };
 static struct rt_timer timer_mcn_freq_est;
+static rt_sem_t mcn_async_sem = RT_NULL;
+static rt_thread_t mcn_async_thread = RT_NULL;
+
+static rt_err_t mcn_async_dispatch_init(void);
+static void mcn_async_dispatch_entry(void* parameter);
 
 /**
  * @brief Topic publish frequency estimator entry
@@ -307,6 +324,9 @@ McnNode_t mcn_subscribe(McnHub_t hub, MCN_EVENT_HANDLE event, void (*pub_cb)(voi
     node->event = event;
     node->pub_cb = pub_cb;
     node->next = RT_NULL;
+    node->async_cb = RT_NULL;
+    node->async_cb_user_data = RT_NULL;
+    node->async_pending = 0;
 
     MCN_ENTER_CRITICAL;
 
@@ -368,6 +388,10 @@ rt_err_t mcn_unsubscribe(McnHub_t hub, McnNode_t node)
     /* update list */
     MCN_ENTER_CRITICAL;
 
+    cur_node->async_cb = RT_NULL;
+    cur_node->async_cb_user_data = RT_NULL;
+    cur_node->async_pending = 0;
+
     if (hub->link_num == 1) {
         hub->link_head = hub->link_tail = RT_NULL;
     } else {
@@ -417,6 +441,8 @@ rt_err_t mcn_publish(McnHub_t hub, const void* data)
     /* update freq estimator window */
     hub->freq_est_window[hub->window_index]++;
 
+    rt_bool_t need_async_notify = RT_FALSE;
+
     MCN_ENTER_CRITICAL;
     /* copy data to hub */
     rt_memcpy(hub->pdata, data, hub->obj_size);
@@ -426,6 +452,11 @@ rt_err_t mcn_publish(McnHub_t hub, const void* data)
     while (node != RT_NULL) {
         /* update each node's renewal flag */
         node->renewal = 1;
+
+        if (node->async_cb != RT_NULL) {
+            node->async_pending = 1;
+            need_async_notify = RT_TRUE;
+        }
 
         /* send out event to wakeup waiting task */
         if (node->event) {
@@ -439,6 +470,10 @@ rt_err_t mcn_publish(McnHub_t hub, const void* data)
 
     hub->published = 1;
     MCN_EXIT_CRITICAL;
+
+    if (need_async_notify && mcn_async_sem != RT_NULL) {
+        rt_sem_release(mcn_async_sem);
+    }
 
     /* invoke callback func */
     node = hub->link_head;
@@ -475,3 +510,118 @@ int mcn_init(void)
     return RT_EOK;
 }
 INIT_DEVICE_EXPORT(mcn_init);
+
+static rt_err_t mcn_async_dispatch_init(void)
+{
+    if (mcn_async_sem == RT_NULL) {
+        mcn_async_sem = rt_sem_create("mcn_cb", 0, RT_IPC_FLAG_FIFO);
+        if (mcn_async_sem == RT_NULL) {
+            LOG_E("create mcn async sem failed");
+            return -RT_ENOMEM;
+        }
+    }
+
+    if (mcn_async_thread == RT_NULL) {
+        mcn_async_thread = rt_thread_create("mcn_cb",
+            mcn_async_dispatch_entry,
+            RT_NULL,
+            MCN_ASYNC_THREAD_STACK_SIZE,
+            MCN_ASYNC_THREAD_PRIORITY,
+            MCN_ASYNC_THREAD_TIMESLICE);
+
+        if (mcn_async_thread == RT_NULL) {
+            LOG_E("create mcn async thread failed");
+            return -RT_ENOMEM;
+        }
+
+        if (rt_thread_startup(mcn_async_thread) != RT_EOK) {
+            LOG_E("start mcn async thread failed");
+            rt_thread_delete(mcn_async_thread);
+            mcn_async_thread = RT_NULL;
+            return -RT_ERROR;
+        }
+    }
+
+    return RT_EOK;
+}
+
+static void mcn_async_dispatch_entry(void* parameter)
+{
+    (void)parameter;
+
+    while (1) {
+        if (rt_sem_take(mcn_async_sem, RT_WAITING_FOREVER) != RT_EOK) {
+            continue;
+        }
+
+        rt_bool_t handled;
+
+        do {
+            handled = RT_FALSE;
+            for (McnList_t cp = &__mcn_list; cp != RT_NULL; cp = cp->next) {
+                McnHub_t hub = cp->hub;
+
+                if (hub == RT_NULL) {
+                    break;
+                }
+
+                void (*cb)(const void*, void*) = RT_NULL;
+                void* user_data = RT_NULL;
+                const void* data = RT_NULL;
+
+                MCN_ENTER_CRITICAL;
+                for (McnNode_t node = hub->link_head; node != RT_NULL; node = node->next) {
+                    if (node->async_cb != RT_NULL && node->async_pending) {
+                        cb = node->async_cb;
+                        user_data = node->async_cb_user_data;
+                        data = hub->pdata;
+                        node->async_pending = 0;
+                        handled = RT_TRUE;
+                        break;
+                    }
+                }
+                MCN_EXIT_CRITICAL;
+
+                if (cb != RT_NULL) {
+                    cb(data, user_data);
+                }
+            }
+        } while (handled);
+    }
+}
+
+rt_err_t mcn_register_async_cb(McnNode_t node_t, void (*async_cb)(const void* data, void* user_data), void* user_data)
+{
+    MCN_ASSERT(node_t != RT_NULL);
+
+    if (async_cb == RT_NULL) {
+        return -RT_ERROR;
+    }
+
+    rt_err_t result = mcn_async_dispatch_init();
+
+    if (result != RT_EOK) {
+        return result;
+    }
+
+    MCN_ENTER_CRITICAL;
+    node_t->async_cb = async_cb;
+    node_t->async_cb_user_data = user_data;
+    node_t->async_pending = 0;
+    MCN_EXIT_CRITICAL;
+
+    return RT_EOK;
+}
+
+rt_err_t mcn_unregister_async_cb(McnNode_t node_t)
+{
+    MCN_ASSERT(node_t != RT_NULL);
+
+    MCN_ENTER_CRITICAL;
+    node_t->async_cb = RT_NULL;
+    node_t->async_cb_user_data = RT_NULL;
+    node_t->async_pending = 0;
+    MCN_EXIT_CRITICAL;
+
+    return RT_EOK;
+}
