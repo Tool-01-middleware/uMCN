@@ -1,9 +1,14 @@
 #include "example_cb.h"
 
 #include <rtthread.h>
+#include <finsh.h>
 #include <string.h>
 #include <uMCN.h>
 #include <ipc/workqueue.h>
+
+#define LOG_TAG "example_cb"
+#define LOG_LVL LOG_LVL_INFO
+#include <ulog.h>
 
 #define EXAMPLE_CB_PUBLISHER_STACK_SIZE    1024
 #define EXAMPLE_CB_WORKQUEUE_STACK_SIZE    1024
@@ -46,10 +51,10 @@ static void example_publisher_entry(void* parameter)
         msg.seq++;
 
         if (mcn_publish(MCN_HUB(example_primary_topic), &msg) != RT_EOK) {
-            rt_kprintf("[example_cb] publish primary topic failed\n");
+            LOG_E("publish primary topic failed");
+        } else {
+            LOG_I("published primary topic seq %u payload %s", msg.seq, msg.payload);
         }
-        rt_kprintf("[example_cb] published primary topic seq %u payload %s\n",
-            msg.seq, msg.payload);
         rt_thread_mdelay(3000);
     }
 }
@@ -58,7 +63,11 @@ static void example_subscriber_job(void* parameter)
 {
     struct example_subscriber_ctx* ctx = (struct example_subscriber_ctx*)parameter;
 
-    rt_kprintf("[example_cb] subscriber handle seq %u payload %s\n",
+    if (ctx == RT_NULL) {
+        return;
+    }
+
+    LOG_I("subscriber handle seq %u payload %s",
         ctx->data.seq, ctx->data.payload);
 }
 
@@ -75,7 +84,7 @@ static void example_subscriber_async_cb(const void* data, void* user_data)
     rt_memcpy(&ctx->data, data, sizeof(ctx->data));
 
     if (rt_workqueue_dowork(example_workqueue, &example_subscriber_work) != RT_EOK) {
-        rt_kprintf("[example_cb] submit work failed\n");
+        LOG_E("submit work failed");
     }
 }
 
@@ -87,7 +96,7 @@ int example_cb_init(void)
 
     result = mcn_advertise(MCN_HUB(example_primary_topic), RT_NULL);
     if (result != RT_EOK) {
-        rt_kprintf("[example_cb] advertise primary topic failed (%d)\n", result);
+        LOG_E("advertise primary topic failed (%d)", result);
         return result;
     }
 
@@ -95,7 +104,7 @@ int example_cb_init(void)
         EXAMPLE_CB_WORKQUEUE_STACK_SIZE,
         EXAMPLE_CB_THREAD_PRIORITY);
     if (example_workqueue == RT_NULL) {
-        rt_kprintf("[example_cb] create workqueue failed\n");
+        LOG_E("create workqueue failed");
         return -RT_ENOMEM;
     }
 
@@ -108,25 +117,25 @@ int example_cb_init(void)
         EXAMPLE_CB_THREAD_PRIORITY,
         EXAMPLE_CB_THREAD_TIMESLICE);
     if (example_publisher_thread == RT_NULL) {
-        rt_kprintf("[example_cb] create publisher thread failed\n");
+        LOG_E("create publisher thread failed");
         return -RT_ENOMEM;
     }
     rt_thread_startup(example_publisher_thread);
 
     example_subscriber_node = mcn_subscribe(MCN_HUB(example_primary_topic), RT_NULL, RT_NULL);
     if (example_subscriber_node == RT_NULL) {
-        rt_kprintf("[example_cb] subscribe primary topic failed\n");
+        LOG_E("subscribe primary topic failed");
         return -RT_ERROR;
     }
 
     result = mcn_register_async_cb(example_subscriber_node, example_subscriber_async_cb, &example_subscriber_context);
     if (result != RT_EOK) {
-        rt_kprintf("[example_cb] register subscriber callback failed (%d)\n", result);
+        LOG_E("register subscriber callback failed (%d)", result);
         return result;
     }
 
-    rt_kprintf("[example_cb] initialized\n");
+    LOG_I("initialized");
     return RT_EOK;
 }
-INIT_APP_EXPORT(example_cb_init);
+MSH_CMD_EXPORT_ALIAS(example_cb_init, example_cb_init, start example cb demo);
 

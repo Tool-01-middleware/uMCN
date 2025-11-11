@@ -2,8 +2,12 @@ import os
 from building import *
 
 cwd = GetCurrentDir()
-src = Glob('src/*.c')
-CPPPATH = [cwd, os.path.join(cwd, 'inc')]
+src = Glob('src/*.c') + Glob('src/*.cpp')
+CPPPATH = [
+    cwd,
+    os.path.join(cwd, 'inc'),
+    os.path.join(cwd, '..', '..', '..', '..', '..', 'kernel', 'rtthread', 'components', 'utilities', 'ulog')
+]
 
 group = DefineGroup('uMCN_example_cb', src, depend=['UMCN_USING_EXAMPLE_CB'], CPPPATH=CPPPATH)
 
